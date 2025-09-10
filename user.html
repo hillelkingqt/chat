@@ -63,6 +63,10 @@
             border-top-right-radius: 20px;
             text-align: center;
             position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
         }
         
         #status-indicator {
@@ -145,6 +149,8 @@
             display: flex;
             padding: 20px;
             border-top: 1px solid var(--input-bg);
+            align-items: center;
+            gap: 10px;
         }
 
         #message-input {
@@ -155,15 +161,14 @@
             color: var(--text-color);
             border-radius: 25px;
             font-size: 1em;
-            margin-right: 10px;
         }
-        
+
         #message-input:focus {
             outline: none;
             box-shadow: 0 0 10px var(--accent-color);
         }
 
-        #send-button {
+        #chat-form button {
             padding: 12px 20px;
             border: none;
             background-color: var(--accent-color);
@@ -173,10 +178,19 @@
             font-weight: 600;
             transition: transform 0.2s, background-color 0.3s;
         }
-        
-        #send-button:hover {
+
+        #chat-form button:hover {
             transform: scale(1.05);
             background-color: #62c3d4;
+        }
+
+        .chat-header button {
+            border: none;
+            background: var(--accent-color);
+            color: var(--bg-color);
+            padding: 6px 10px;
+            border-radius: 8px;
+            cursor: pointer;
         }
     </style>
 </head>
@@ -186,77 +200,187 @@
         <div class="chat-header">
             <span id="status-indicator"></span>
             <h3>Live Support</h3>
+            <button id="rename-button" type="button">✏️</button>
         </div>
         <div id="chat-messages">
             <!-- Messages will appear here -->
         </div>
         <form id="chat-form">
             <input type="text" id="message-input" placeholder="Ask us anything..." autocomplete="off">
+            <button type="button" id="emoji-button">😊</button>
+            <button type="button" id="file-button">📎</button>
             <button type="submit" id="send-button">Send</button>
+            <input type="file" id="file-input" style="display:none" />
         </form>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/emoji-button@latest/dist/index.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // !!! IMPORTANT: Change this URL to your Render app URL when deployed !!!
             const WEBSOCKET_URL = 'wss://chat-i8zf.onrender.com/live-chat';
-            
+
             const messagesContainer = document.getElementById('chat-messages');
             const messageForm = document.getElementById('chat-form');
             const messageInput = document.getElementById('message-input');
             const statusIndicator = document.getElementById('status-indicator');
+            const emojiButton = document.getElementById('emoji-button');
+            const fileButton = document.getElementById('file-button');
+            const fileInput = document.getElementById('file-input');
+            const renameButton = document.getElementById('rename-button');
 
-            const socket = new WebSocket(WEBSOCKET_URL);
+            const picker = new EmojiButton();
+            emojiButton.addEventListener('click', () => picker.togglePicker(emojiButton));
+            picker.on('emoji', emoji => {
+                messageInput.value += emoji;
+                messageInput.focus();
+            });
 
-            socket.onopen = () => {
-                console.log('Connected to WebSocket server.');
-                statusIndicator.classList.add('connected');
-                // Identify as a user
-                socket.send(JSON.stringify({ type: 'user-init' }));
-                addMessage('received', 'Welcome! How can we help you today?');
-            };
-
-            socket.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                if (data.type === 'message') {
-                    addMessage('received', data.text);
+            fileButton.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', () => {
+                const file = fileInput.files[0];
+                if (file) {
+                    sendFile(file);
                 }
-            };
-            
-            socket.onclose = () => {
-                console.log('WebSocket connection closed.');
-                statusIndicator.classList.remove('connected');
-                addMessage('received', 'Connection to support has been lost. Please refresh.');
-            };
+                fileInput.value = '';
+            });
 
-socket.onerror = (error) => {
-    console.error('WebSocket Error:', error);
-    statusIndicator.classList.remove('connected');
-    addMessage('received', 'Could not connect to the support server.'); // שים לב שהנתיב נמחק
-};
+            messageInput.addEventListener('paste', (e) => {
+                const items = e.clipboardData.items;
+                for (const item of items) {
+                    if (item.kind === 'file') {
+                        const file = item.getAsFile();
+                        if (file) {
+                            sendFile(file);
+                        }
+                        e.preventDefault();
+                    }
+                }
+            });
+
+            let socket;
+            let reconnectDelay = 1000;
+            let currentName = prompt('Enter your name:', 'Guest') || 'Guest';
+
+            renameButton.addEventListener('click', () => {
+                const newName = prompt('Enter new name:', currentName);
+                if (newName && newName !== currentName) {
+                    currentName = newName;
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({ type: 'rename', name: currentName }));
+                    }
+                }
+            });
+
+            function connect() {
+                socket = new WebSocket(WEBSOCKET_URL);
+
+                socket.onopen = () => {
+                    reconnectDelay = 1000;
+                    statusIndicator.classList.add('connected');
+                    socket.send(JSON.stringify({ type: 'user-init', name: currentName }));
+                    addMessage('received', 'Welcome! How can we help you today?');
+                    startHeartbeat();
+                };
+
+                socket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'message') {
+                        addMessage('received', linkify(data.text));
+                    } else if (data.type === 'file') {
+                        addFileMessage('received', data.name, data.mime, data.data);
+                    }
+                };
+
+                socket.onclose = () => {
+                    statusIndicator.classList.remove('connected');
+                    stopHeartbeat();
+                    addMessage('received', 'Connection lost. Reconnecting...');
+                    setTimeout(connect, reconnectDelay);
+                    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+                };
+
+                socket.onerror = () => {
+                    socket.close();
+                };
+            }
+
+            connect();
+
+            let heartbeatInterval;
+            function startHeartbeat() {
+                heartbeatInterval = setInterval(() => {
+                    if (socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({ type: 'ping' }));
+                    }
+                }, 30000);
+            }
+
+            function stopHeartbeat() {
+                clearInterval(heartbeatInterval);
+            }
+
             messageForm.addEventListener('submit', (e) => {
                 e.preventDefault();
                 const messageText = messageInput.value.trim();
-                if (messageText) {
-                    addMessage('sent', messageText);
+                if (messageText && socket.readyState === WebSocket.OPEN) {
+                    addMessage('sent', linkify(messageText));
                     socket.send(JSON.stringify({ type: 'message', text: messageText }));
                     messageInput.value = '';
                 }
             });
 
-            function addMessage(type, text) {
+            function sendFile(file) {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64 = reader.result.split(',')[1];
+                    socket.send(JSON.stringify({
+                        type: 'file',
+                        name: file.name,
+                        mime: file.type,
+                        data: base64
+                    }));
+                    addFileMessage('sent', file.name, file.type, base64);
+                };
+                reader.readAsDataURL(file);
+            }
+
+            function addMessage(type, html) {
                 const messageDiv = document.createElement('div');
                 messageDiv.classList.add('message', type);
 
                 const bubbleDiv = document.createElement('div');
                 bubbleDiv.classList.add('message-bubble');
-                bubbleDiv.textContent = text;
-                
+                bubbleDiv.innerHTML = html;
+
                 messageDiv.appendChild(bubbleDiv);
                 messagesContainer.appendChild(messageDiv);
-                
-                // Scroll to the bottom
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+
+            function addFileMessage(type, name, mime, data) {
+                const blob = b64toBlob(data, mime);
+                const url = URL.createObjectURL(blob);
+                let html;
+                if (mime.startsWith('image/')) {
+                    html = `<img src="${url}" alt="${name}" style="max-width:100%;">`;
+                } else {
+                    html = `<a href="${url}" download="${name}" target="_blank">${name}</a>`;
+                }
+                addMessage(type, html);
+            }
+
+            function linkify(text) {
+                return text.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank">$1</a>');
+            }
+
+            function b64toBlob(base64, mime) {
+                const byteChars = atob(base64);
+                const byteNumbers = new Array(byteChars.length);
+                for (let i = 0; i < byteChars.length; i++) {
+                    byteNumbers[i] = byteChars.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                return new Blob([byteArray], { type: mime });
             }
         });
     </script>

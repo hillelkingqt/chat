@@ -176,10 +176,12 @@
             display: none; /* Initially hidden */
             padding: 20px;
             background-color: var(--sidebar-color);
+            align-items: center;
+            gap: 10px;
         }
 
         #chat-form input {
-            width: 100%;
+            flex-grow: 1;
             padding: 15px;
             border: none;
             border-radius: 8px;
@@ -191,6 +193,15 @@
         #chat-form input:focus {
             outline: none;
             box-shadow: 0 0 15px var(--accent-color);
+        }
+
+        #chat-form button {
+            padding: 12px 16px;
+            border: none;
+            border-radius: 8px;
+            background-color: var(--accent-color);
+            color: var(--bg-color);
+            cursor: pointer;
         }
     </style>
 </head>
@@ -216,104 +227,166 @@
             </div>
             <form id="chat-form">
                 <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off">
+                <button type="button" id="emoji-button">😊</button>
+                <button type="button" id="file-button">📎</button>
+                <button type="submit" id="send-button">Send</button>
+                <input type="file" id="file-input" style="display:none" />
             </form>
         </main>
     </div>
-
+    <script src="https://cdn.jsdelivr.net/npm/emoji-button@latest/dist/index.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // !!! IMPORTANT: Change this URL to your Render app URL when deployed !!!
             const WEBSOCKET_URL = 'wss://chat-i8zf.onrender.com/live-chat';
-            
+
             const userList = document.getElementById('user-list');
             const chatWindow = document.getElementById('chat-window');
             const messageInput = document.getElementById('message-input');
             const chatForm = document.getElementById('chat-form');
             const currentChatUserHeader = document.getElementById('current-chat-user');
             const noUserSelectedView = document.getElementById('no-user-selected');
+            const fileInput = document.getElementById('file-input');
+            const emojiButton = document.getElementById('emoji-button');
+            const fileButton = document.getElementById('file-button');
 
-            let selectedUserId = null;
-            let chats = {}; // Store message history for each user
+            const picker = new EmojiButton();
+            emojiButton.addEventListener('click', () => picker.togglePicker(emojiButton));
+            picker.on('emoji', emoji => {
+                messageInput.value += emoji;
+                messageInput.focus();
+            });
 
-            const socket = new WebSocket(WEBSOCKET_URL);
-
-            socket.onopen = () => {
-                console.log('Connected to WebSocket server as Admin.');
-                // Identify as admin
-                socket.send(JSON.stringify({ type: 'admin-init' }));
-            };
-
-            socket.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                
-                switch (data.type) {
-                    case 'user-connected':
-                        addUserToList(data.id);
-                        break;
-                    case 'user-disconnected':
-                        removeUserFromList(data.id);
-                        break;
-                    case 'message':
-                        handleIncomingMessage(data);
-                        break;
-                    case 'all-users':
-                        data.users.forEach(userId => addUserToList(userId));
-                        break;
+            fileButton.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', () => {
+                const file = fileInput.files[0];
+                if (file && selectedUserId) {
+                    sendFile(file);
                 }
-            };
+                fileInput.value = '';
+            });
 
-            socket.onclose = () => {
-                console.log('WebSocket connection closed.');
-                alert('Connection lost. Please refresh the page.');
-            };
-            
-            socket.onerror = (error) => {
-                console.error('WebSocket Error:', error);
-                alert('Could not connect to the chat server.');
-            };
+            messageInput.addEventListener('paste', (e) => {
+                const items = e.clipboardData.items;
+                for (const item of items) {
+                    if (item.kind === 'file') {
+                        const file = item.getAsFile();
+                        if (file && selectedUserId) {
+                            sendFile(file);
+                        }
+                        e.preventDefault();
+                    }
+                }
+            });
+
+            let socket;
+            let reconnectDelay = 1000;
+            let selectedUserId = null;
+            let chats = {};
+
+            function connect() {
+                socket = new WebSocket(WEBSOCKET_URL);
+
+                socket.onopen = () => {
+                    reconnectDelay = 1000;
+                    socket.send(JSON.stringify({ type: 'admin-init' }));
+                    startHeartbeat();
+                };
+
+                socket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    switch (data.type) {
+                        case 'user-connected':
+                            addUserToList(data.id, data.name, data.ip);
+                            break;
+                        case 'user-disconnected':
+                            removeUserFromList(data.id);
+                            break;
+                        case 'user-renamed':
+                            renameUser(data.id, data.name);
+                            break;
+                        case 'message':
+                            handleIncomingMessage(data);
+                            break;
+                        case 'file':
+                            handleIncomingFile(data);
+                            break;
+                        case 'all-users':
+                            data.users.forEach(u => addUserToList(u.id, u.name, u.ip));
+                            break;
+                        case 'pong':
+                            break;
+                    }
+                };
+
+                socket.onclose = () => {
+                    stopHeartbeat();
+                    setTimeout(connect, reconnectDelay);
+                    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+                };
+
+                socket.onerror = () => {
+                    socket.close();
+                };
+            }
+
+            connect();
+
+            let heartbeatInterval;
+            function startHeartbeat() {
+                heartbeatInterval = setInterval(() => {
+                    if (socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({ type: 'ping' }));
+                    }
+                }, 30000);
+            }
+
+            function stopHeartbeat() {
+                clearInterval(heartbeatInterval);
+            }
 
             chatForm.addEventListener('submit', (e) => {
                 e.preventDefault();
                 const messageText = messageInput.value.trim();
-                if (messageText && selectedUserId) {
-                    const message = {
-                        type: 'message',
-                        to: selectedUserId,
-                        text: messageText
-                    };
-                    socket.send(JSON.stringify(message));
-                    addMessageToChat(selectedUserId, 'sent', messageText);
+                if (messageText && selectedUserId && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ type: 'message', to: selectedUserId, text: messageText }));
+                    addMessageToChat(selectedUserId, 'sent', linkify(messageText));
                     messageInput.value = '';
                 }
             });
 
-            function addUserToList(userId) {
-                if (document.getElementById(`user-${userId}`)) return; // Already exists
-                
-                const userItem = document.createElement('li');
-                userItem.id = `user-${userId}`;
-                userItem.textContent = `User: ${userId.substring(0, 8)}`;
-                userItem.dataset.userId = userId;
-                
-                userItem.addEventListener('click', () => {
-                    selectUser(userId);
-                });
-                
-                userList.appendChild(userItem);
-                
-                if (!chats[userId]) {
-                    chats[userId] = [];
-                }
+            function sendFile(file) {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64 = reader.result.split(',')[1];
+                    socket.send(JSON.stringify({
+                        type: 'file',
+                        to: selectedUserId,
+                        name: file.name,
+                        mime: file.type,
+                        data: base64
+                    }));
+                    addFileMessage(selectedUserId, 'sent', file.name, file.type, base64);
+                };
+                reader.readAsDataURL(file);
             }
 
-            function removeUserFromList(userId) {
-                const userItem = document.getElementById(`user-${userId}`);
-                if (userItem) {
-                    userItem.style.animation = 'slideOutToLeft 0.5s forwards';
-                    setTimeout(() => userItem.remove(), 500);
-                }
-                
-                if (selectedUserId === userId) {
+            function addUserToList(id, name, ip) {
+                if (document.getElementById(`user-${id}`)) return;
+                const userItem = document.createElement('li');
+                userItem.id = `user-${id}`;
+                userItem.dataset.userId = id;
+                userItem.dataset.ip = ip;
+                userItem.textContent = `${name} (${ip})`;
+                userItem.addEventListener('click', () => selectUser(id));
+                userList.appendChild(userItem);
+                chats[id] = chats[id] || [];
+            }
+
+            function removeUserFromList(id) {
+                const userItem = document.getElementById(`user-${id}`);
+                if (userItem) userItem.remove();
+                delete chats[id];
+                if (selectedUserId === id) {
                     selectedUserId = null;
                     chatWindow.innerHTML = '';
                     chatWindow.style.display = 'none';
@@ -323,51 +396,55 @@
                 }
             }
 
-            function selectUser(userId) {
+            function renameUser(id, name) {
+                const userItem = document.getElementById(`user-${id}`);
+                if (userItem) {
+                    userItem.textContent = `${name} (${userItem.dataset.ip})`;
+                }
+            }
+
+            function selectUser(id) {
                 if (selectedUserId) {
                     document.getElementById(`user-${selectedUserId}`)?.classList.remove('active');
                 }
-                selectedUserId = userId;
-                document.getElementById(`user-${userId}`).classList.add('active');
-                
-                currentChatUserHeader.textContent = `Chatting with User: ${userId.substring(0, 8)}`;
+                selectedUserId = id;
+                document.getElementById(`user-${id}`).classList.add('active');
+                currentChatUserHeader.textContent = `Chatting with ${document.getElementById(`user-${id}`).textContent}`;
                 noUserSelectedView.style.display = 'none';
                 chatWindow.style.display = 'block';
-                chatForm.style.display = 'block';
-
-                loadChatHistory(userId);
+                chatForm.style.display = 'flex';
+                loadChatHistory(id);
             }
 
-            function loadChatHistory(userId) {
+            function loadChatHistory(id) {
                 chatWindow.innerHTML = '';
-                chats[userId].forEach(msg => {
-                     const messageElement = document.createElement('div');
-                    messageElement.classList.add('message', msg.direction);
-                    messageElement.textContent = msg.text;
-                    chatWindow.appendChild(messageElement);
+                (chats[id] || []).forEach(msg => {
+                    if (msg.type === 'file') {
+                        appendFileMessage(msg.direction, msg.name, msg.mime, msg.data);
+                    } else {
+                        appendMessage(msg.direction, msg.html);
+                    }
                 });
                 chatWindow.scrollTop = chatWindow.scrollHeight;
             }
 
             function handleIncomingMessage(message) {
                 const fromUserId = message.from;
-                addMessageToChat(fromUserId, 'received', message.text);
+                addMessageToChat(fromUserId, 'received', linkify(message.text));
             }
 
-            function addMessageToChat(userId, direction, text) {
-                // Save to history
-                if (!chats[userId]) chats[userId] = [];
-                chats[userId].push({ direction, text });
-                
-                // If this is the currently active chat, display it
+            function handleIncomingFile(message) {
+                const fromUserId = message.from;
+                addFileMessage(fromUserId, 'received', message.name, message.mime, message.data);
+            }
+
+            function addMessageToChat(userId, direction, html) {
+                chats[userId] = chats[userId] || [];
+                chats[userId].push({ direction, html });
+
                 if (userId === selectedUserId) {
-                    const messageElement = document.createElement('div');
-                    messageElement.classList.add('message', direction);
-                    messageElement.textContent = text;
-                    chatWindow.appendChild(messageElement);
-                    chatWindow.scrollTop = chatWindow.scrollHeight;
+                    appendMessage(direction, html);
                 } else {
-                    // Optional: Add a notification dot to the user in the list
                     const userItem = document.getElementById(`user-${userId}`);
                     if (userItem && !userItem.querySelector('.notification-dot')) {
                         const dot = document.createElement('span');
@@ -375,6 +452,48 @@
                         userItem.appendChild(dot);
                     }
                 }
+            }
+
+            function addFileMessage(userId, direction, name, mime, data) {
+                chats[userId] = chats[userId] || [];
+                chats[userId].push({ type: 'file', direction, name, mime, data });
+                if (userId === selectedUserId) {
+                    appendFileMessage(direction, name, mime, data);
+                }
+            }
+
+            function appendMessage(direction, html) {
+                const messageElement = document.createElement('div');
+                messageElement.classList.add('message', direction);
+                messageElement.innerHTML = html;
+                chatWindow.appendChild(messageElement);
+                chatWindow.scrollTop = chatWindow.scrollHeight;
+            }
+
+            function appendFileMessage(direction, name, mime, data) {
+                const blob = b64toBlob(data, mime);
+                const url = URL.createObjectURL(blob);
+                let html;
+                if (mime.startsWith('image/')) {
+                    html = `<img src="${url}" alt="${name}" style="max-width:100%;">`;
+                } else {
+                    html = `<a href="${url}" download="${name}" target="_blank">${name}</a>`;
+                }
+                appendMessage(direction, html);
+            }
+
+            function linkify(text) {
+                return text.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank">$1</a>');
+            }
+
+            function b64toBlob(base64, mime) {
+                const byteChars = atob(base64);
+                const byteNumbers = new Array(byteChars.length);
+                for (let i = 0; i < byteChars.length; i++) {
+                    byteNumbers[i] = byteChars.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                return new Blob([byteArray], { type: mime });
             }
         });
     </script>
