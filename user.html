@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Support Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #1a1a2e;
+            --chat-bg: #16213e;
+            --primary-color: #e94560;
+            --accent-color: #53a8b6;
+            --text-color: #e0e0e0;
+            --input-bg: #2a2a4e;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, var(--bg-color) 0%, var(--chat-bg) 100%);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .chat-widget {
+            width: 90%;
+            max-width: 450px;
+            height: 80vh;
+            max-height: 700px;
+            background-color: var(--chat-bg);
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            opacity: 0;
+            transform: scale(0.9);
+            animation: popInWidget 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        @keyframes popInWidget {
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .chat-header {
+            padding: 20px;
+            background-color: var(--input-bg);
+            border-top-left-radius: 20px;
+            border-top-right-radius: 20px;
+            text-align: center;
+            position: relative;
+        }
+        
+        #status-indicator {
+            position: absolute;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #f8d7da; /* Default: disconnected */
+            transition: background-color 0.5s;
+        }
+
+        #status-indicator.connected {
+            background-color: #28a745;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(40, 167, 69, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+        }
+
+        .chat-header h3 {
+            font-size: 1.2em;
+            margin: 0;
+        }
+
+        #chat-messages {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .message {
+            display: flex;
+            margin-bottom: 15px;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: popInMessage 0.4s forwards;
+            max-width: 80%;
+        }
+        
+        @keyframes popInMessage {
+             to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message-bubble {
+             padding: 12px 18px;
+             border-radius: 20px;
+             word-wrap: break-word;
+        }
+
+        .message.sent {
+            margin-left: auto;
+            flex-direction: row-reverse;
+        }
+
+        .message.sent .message-bubble {
+            background-color: var(--accent-color);
+            color: var(--bg-color);
+            border-bottom-right-radius: 5px;
+        }
+
+        .message.received {
+            margin-right: auto;
+        }
+        
+        .message.received .message-bubble {
+             background-color: var(--input-bg);
+             border-bottom-left-radius: 5px;
+        }
+        
+        #chat-form {
+            display: flex;
+            padding: 20px;
+            border-top: 1px solid var(--input-bg);
+        }
+
+        #message-input {
+            flex-grow: 1;
+            padding: 12px;
+            border: none;
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            border-radius: 25px;
+            font-size: 1em;
+            margin-right: 10px;
+        }
+        
+        #message-input:focus {
+            outline: none;
+            box-shadow: 0 0 10px var(--accent-color);
+        }
+
+        #send-button {
+            padding: 12px 20px;
+            border: none;
+            background-color: var(--accent-color);
+            color: var(--bg-color);
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.2s, background-color 0.3s;
+        }
+        
+        #send-button:hover {
+            transform: scale(1.05);
+            background-color: #62c3d4;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="chat-widget">
+        <div class="chat-header">
+            <span id="status-indicator"></span>
+            <h3>Live Support</h3>
+        </div>
+        <div id="chat-messages">
+            <!-- Messages will appear here -->
+        </div>
+        <form id="chat-form">
+            <input type="text" id="message-input" placeholder="Ask us anything..." autocomplete="off">
+            <button type="submit" id="send-button">Send</button>
+        </form>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // !!! IMPORTANT: Change this URL to your Render app URL when deployed !!!
+            const WEBSOCKET_URL = 'wss://chat-i8zf.onrender.com/live-chat';
+            
+            const messagesContainer = document.getElementById('chat-messages');
+            const messageForm = document.getElementById('chat-form');
+            const messageInput = document.getElementById('message-input');
+            const statusIndicator = document.getElementById('status-indicator');
+
+            const socket = new WebSocket(WEBSOCKET_URL);
+
+            socket.onopen = () => {
+                console.log('Connected to WebSocket server.');
+                statusIndicator.classList.add('connected');
+                // Identify as a user
+                socket.send(JSON.stringify({ type: 'user-init' }));
+                addMessage('received', 'Welcome! How can we help you today?');
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'message') {
+                    addMessage('received', data.text);
+                }
+            };
+            
+            socket.onclose = () => {
+                console.log('WebSocket connection closed.');
+                statusIndicator.classList.remove('connected');
+                addMessage('received', 'Connection to support has been lost. Please refresh.');
+            };
+
+socket.onerror = (error) => {
+    console.error('WebSocket Error:', error);
+    statusIndicator.classList.remove('connected');
+    addMessage('received', 'Could not connect to the support server.'); // שים לב שהנתיב נמחק
+};
+            messageForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const messageText = messageInput.value.trim();
+                if (messageText) {
+                    addMessage('sent', messageText);
+                    socket.send(JSON.stringify({ type: 'message', text: messageText }));
+                    messageInput.value = '';
+                }
+            });
+
+            function addMessage(type, text) {
+                const messageDiv = document.createElement('div');
+                messageDiv.classList.add('message', type);
+
+                const bubbleDiv = document.createElement('div');
+                bubbleDiv.classList.add('message-bubble');
+                bubbleDiv.textContent = text;
+                
+                messageDiv.appendChild(bubbleDiv);
+                messagesContainer.appendChild(messageDiv);
+                
+                // Scroll to the bottom
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        });
+    </script>
+</body>
+</html>

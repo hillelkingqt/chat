@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Chat Panel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #1a1a2e;
+            --sidebar-color: #16213e;
+            --chat-bg: #0f3460;
+            --primary-color: #e94560;
+            --accent-color: #53a8b6;
+            --text-color: #e0e0e0;
+            --input-bg: #2a2a4e;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            opacity: 0;
+            animation: fadeIn 0.5s forwards;
+        }
+
+        @keyframes fadeIn {
+            to { opacity: 1; }
+        }
+
+        .admin-panel {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+
+        #user-sidebar {
+            width: 300px;
+            background-color: var(--sidebar-color);
+            border-right: 2px solid var(--chat-bg);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #user-sidebar h2 {
+            border-bottom: 2px solid var(--accent-color);
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        #user-list {
+            list-style-type: none;
+            overflow-y: auto;
+        }
+
+        #user-list li {
+            padding: 15px;
+            margin-bottom: 10px;
+            background-color: var(--input-bg);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.2s;
+            position: relative;
+            padding-left: 30px;
+            animation: slideInFromLeft 0.5s ease-out forwards;
+        }
+        
+        @keyframes slideInFromLeft {
+            from { transform: translateX(-100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        #user-list li:before {
+            content: '';
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 10px;
+            height: 10px;
+            background-color: #28a745;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(40, 167, 69, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+        }
+
+        #user-list li.active, #user-list li:hover {
+            background-color: var(--accent-color);
+            color: var(--bg-color);
+            transform: scale(1.02);
+        }
+
+        .chat-container {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            background: linear-gradient(135deg, var(--bg-color) 0%, var(--chat-bg) 100%);
+        }
+
+        #chat-header {
+            padding: 20px;
+            background-color: var(--sidebar-color);
+            border-bottom: 2px solid var(--chat-bg);
+            text-align: center;
+        }
+
+        #chat-header h3 {
+            font-size: 1.2em;
+        }
+        
+        #no-user-selected {
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5em;
+            color: #777;
+        }
+
+        #chat-window {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: none; /* Initially hidden */
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            padding: 10px 15px;
+            border-radius: 18px;
+            max-width: 70%;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: popIn 0.3s forwards;
+        }
+        
+        @keyframes popIn {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.sent {
+            background-color: var(--accent-color);
+            color: var(--bg-color);
+            margin-left: auto;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.received {
+            background-color: var(--input-bg);
+            margin-right: auto;
+            border-bottom-left-radius: 4px;
+        }
+
+        #chat-form {
+            display: none; /* Initially hidden */
+            padding: 20px;
+            background-color: var(--sidebar-color);
+        }
+
+        #chat-form input {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            font-size: 1em;
+        }
+
+        #chat-form input:focus {
+            outline: none;
+            box-shadow: 0 0 15px var(--accent-color);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="admin-panel">
+        <aside id="user-sidebar">
+            <h2>Connected Users</h2>
+            <ul id="user-list">
+                <!-- Users will be dynamically added here -->
+            </ul>
+        </aside>
+
+        <main class="chat-container">
+            <div id="chat-header">
+                <h3 id="current-chat-user">Select a user to start chatting</h3>
+            </div>
+            <div id="no-user-selected">
+                <p>Waiting for users to connect...</p>
+            </div>
+            <div id="chat-window">
+                <!-- Messages will be appended here -->
+            </div>
+            <form id="chat-form">
+                <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off">
+            </form>
+        </main>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // !!! IMPORTANT: Change this URL to your Render app URL when deployed !!!
+            const WEBSOCKET_URL = 'wss://chat-i8zf.onrender.com/live-chat';
+            
+            const userList = document.getElementById('user-list');
+            const chatWindow = document.getElementById('chat-window');
+            const messageInput = document.getElementById('message-input');
+            const chatForm = document.getElementById('chat-form');
+            const currentChatUserHeader = document.getElementById('current-chat-user');
+            const noUserSelectedView = document.getElementById('no-user-selected');
+
+            let selectedUserId = null;
+            let chats = {}; // Store message history for each user
+
+            const socket = new WebSocket(WEBSOCKET_URL);
+
+            socket.onopen = () => {
+                console.log('Connected to WebSocket server as Admin.');
+                // Identify as admin
+                socket.send(JSON.stringify({ type: 'admin-init' }));
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                switch (data.type) {
+                    case 'user-connected':
+                        addUserToList(data.id);
+                        break;
+                    case 'user-disconnected':
+                        removeUserFromList(data.id);
+                        break;
+                    case 'message':
+                        handleIncomingMessage(data);
+                        break;
+                    case 'all-users':
+                        data.users.forEach(userId => addUserToList(userId));
+                        break;
+                }
+            };
+
+            socket.onclose = () => {
+                console.log('WebSocket connection closed.');
+                alert('Connection lost. Please refresh the page.');
+            };
+            
+            socket.onerror = (error) => {
+                console.error('WebSocket Error:', error);
+                alert('Could not connect to the chat server.');
+            };
+
+            chatForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const messageText = messageInput.value.trim();
+                if (messageText && selectedUserId) {
+                    const message = {
+                        type: 'message',
+                        to: selectedUserId,
+                        text: messageText
+                    };
+                    socket.send(JSON.stringify(message));
+                    addMessageToChat(selectedUserId, 'sent', messageText);
+                    messageInput.value = '';
+                }
+            });
+
+            function addUserToList(userId) {
+                if (document.getElementById(`user-${userId}`)) return; // Already exists
+                
+                const userItem = document.createElement('li');
+                userItem.id = `user-${userId}`;
+                userItem.textContent = `User: ${userId.substring(0, 8)}`;
+                userItem.dataset.userId = userId;
+                
+                userItem.addEventListener('click', () => {
+                    selectUser(userId);
+                });
+                
+                userList.appendChild(userItem);
+                
+                if (!chats[userId]) {
+                    chats[userId] = [];
+                }
+            }
+
+            function removeUserFromList(userId) {
+                const userItem = document.getElementById(`user-${userId}`);
+                if (userItem) {
+                    userItem.style.animation = 'slideOutToLeft 0.5s forwards';
+                    setTimeout(() => userItem.remove(), 500);
+                }
+                
+                if (selectedUserId === userId) {
+                    selectedUserId = null;
+                    chatWindow.innerHTML = '';
+                    chatWindow.style.display = 'none';
+                    chatForm.style.display = 'none';
+                    noUserSelectedView.style.display = 'flex';
+                    currentChatUserHeader.textContent = 'Select a user to start chatting';
+                }
+            }
+
+            function selectUser(userId) {
+                if (selectedUserId) {
+                    document.getElementById(`user-${selectedUserId}`)?.classList.remove('active');
+                }
+                selectedUserId = userId;
+                document.getElementById(`user-${userId}`).classList.add('active');
+                
+                currentChatUserHeader.textContent = `Chatting with User: ${userId.substring(0, 8)}`;
+                noUserSelectedView.style.display = 'none';
+                chatWindow.style.display = 'block';
+                chatForm.style.display = 'block';
+
+                loadChatHistory(userId);
+            }
+
+            function loadChatHistory(userId) {
+                chatWindow.innerHTML = '';
+                chats[userId].forEach(msg => {
+                     const messageElement = document.createElement('div');
+                    messageElement.classList.add('message', msg.direction);
+                    messageElement.textContent = msg.text;
+                    chatWindow.appendChild(messageElement);
+                });
+                chatWindow.scrollTop = chatWindow.scrollHeight;
+            }
+
+            function handleIncomingMessage(message) {
+                const fromUserId = message.from;
+                addMessageToChat(fromUserId, 'received', message.text);
+            }
+
+            function addMessageToChat(userId, direction, text) {
+                // Save to history
+                if (!chats[userId]) chats[userId] = [];
+                chats[userId].push({ direction, text });
+                
+                // If this is the currently active chat, display it
+                if (userId === selectedUserId) {
+                    const messageElement = document.createElement('div');
+                    messageElement.classList.add('message', direction);
+                    messageElement.textContent = text;
+                    chatWindow.appendChild(messageElement);
+                    chatWindow.scrollTop = chatWindow.scrollHeight;
+                } else {
+                    // Optional: Add a notification dot to the user in the list
+                    const userItem = document.getElementById(`user-${userId}`);
+                    if (userItem && !userItem.querySelector('.notification-dot')) {
+                        const dot = document.createElement('span');
+                        dot.className = 'notification-dot';
+                        userItem.appendChild(dot);
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
